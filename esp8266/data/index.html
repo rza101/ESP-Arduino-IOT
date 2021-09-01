@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ESP-ARDUINO IOT</title>
+    <link rel="icon" type="image/png" href="favicon.png"/>
+    <link href="bootstrap.min.css.gzp" rel="stylesheet" type = "text/css">
+    <link href="bootstrap-vue.min.css.gzp" rel="stylesheet" type = "text/css">
+    <script defer src="bootstrap-vue.min.js.gzp" type="application/javascript"></script>
+    <script defer src="axios.min.js.gzp" type="application/javascript"></script>
+    <script defer src="vue.global.js.gzp" type="application/javascript"></script>
+  </head>
+  <body>
+    <div class="container" id="mainFrame">
+      <div class="mt-3 text-center"><h1 class="display-5">ESP-ARDUINO IOT</h1></div>
+      <div class="mt-5 text-center"><h3>Pin Control</h3></div>
+      <div id = "pinControl"></div>
+      <div class="mt-5 text-center"><h3>Scheduler</h3></div>
+      <div id = "scheduler"></div>
+      <div class="mt-5 text-center"><h3>Options</h3></div>
+      <div id = "options position-relative">
+        <a class="btn btn-outline-danger position-absolute start-50 translate-middle mt-4" role="button" onclick="logout();">Logout</a>
+      </div>
+    </div>
+    <script defer src="main.js" type="application/javascript"></script>
+  </body>
+</html>
