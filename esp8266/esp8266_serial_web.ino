@@ -39,10 +39,9 @@ WiFiManager wifiManager;
 const char* indexUser = "admin";
 const char* indexPass = "admin";
 
-char mainjs[32];
-char datajs[32];
-char socketURL[32];
-char jsonURLS[512];
+char datajs[24];
+char mainjs[24];
+char jsonURLS[768];
 
 unsigned long lastCleanupClient = 0;
 unsigned long lastSocketNotify = 0;
@@ -124,14 +123,14 @@ void espRestart(){
 }
 
 void garbageCollector(JsonDocument &data){
-  String tempJson;
+  String tempJson = "";
   serializeJson(data, tempJson);
   deserializeJson(data, tempJson);
 }
 
 String generateJSON(boolean success, String msgKey, String msgValue){
   StaticJsonDocument<256> doc;
-  String result;
+  String result = "";
 
   doc["success"] = success;
   doc[msgKey] = msgValue;
@@ -142,7 +141,7 @@ String generateJSON(boolean success, String msgKey, String msgValue){
 }
 
 String generateRandomString(int len){
-  String randString;
+  String randString = "";
 
   for(int i = 1; i <= len; i++){
     byte randomValue = random(0, 35);
@@ -161,7 +160,7 @@ String generateRandomString(int len){
 }
 
 String generateUniqueID(){
-  String randString;
+  String randString = "";
   boolean duplicate = false;
 
   do{
@@ -256,17 +255,18 @@ String readFile(fs::FS &fs, const char* path){
 }
 
 void saveSchedule(){
-  String temp;
+  String temp = "";
   serializeJson(schedule, temp);
+  
   if(writeFile(LittleFS, "/schedule.txt", temp.c_str())){
-    Serial.print("SAVESUCCESS ");
+    Serial.print("SAVED ");
   }
 }
 
 void scheduler(){
   if(!sending && !updatePinState && timeClient.isTimeSet()){
     if(millis() - lastSchedule >= 500){
-      boolean collect = false;
+      boolean deleted = false;
       lastSchedule = millis();
 
       for(JsonArray::iterator it = scheduleOneTime.begin(); it != scheduleOneTime.end(); ++it){
@@ -278,11 +278,14 @@ void scheduler(){
           unsigned long duration = (endTimestamp - startTimestamp)*1000;
           sendCommand("SETTIMED " + String(pin) + " " + String(duration));
           updatePinState = true;
+
+          scheduleOneTime.remove(it);
+          deleted = true;
         }
 
         if(endTimestamp < getEpochTime()){
           scheduleOneTime.remove(it);
-          collect = true;
+          deleted = true;
         }
       }
       
@@ -300,7 +303,7 @@ void scheduler(){
         }
       }
 
-      if(collect){
+      if(deleted){
         garbageCollector(schedule);
         saveSchedule();
       }
@@ -341,7 +344,7 @@ boolean writeFile(fs::FS &fs, const char* path, const char* message){
 void updatePin(){
   if(!sending && updatePinState){
     char tempState[128];
-    String result;
+    String result = "";
     
     sendCommand("READ");
     
@@ -397,7 +400,7 @@ String templateProcessor(const String& var){
   }else if(var == "PINSTATE"){
     return String(pinState);
   }else if(var == "SCHEDULE"){
-    String temp;
+    String temp = "";
     serializeJson(schedule, temp);
     return temp;
   }else if(var == "LAST_STARTUP"){
@@ -440,7 +443,7 @@ void dataJSHandler(AsyncWebServerRequest *request){
 }
 
 void setPin(AsyncWebServerRequest *request){
-  String msg;
+  String msg = "";
   
   if(request -> hasParam("pin", true) && request -> hasParam("state", true)){
     unsigned int pin = request->getParam("pin", true)->value().toInt();
@@ -461,7 +464,7 @@ void setPin(AsyncWebServerRequest *request){
 }
 
 void setPinTimed(AsyncWebServerRequest *request){
-  String msg;
+  String msg = "";
   
   if(request -> hasParam("pin", true) && request -> hasParam("duration", true)){
     unsigned int pin = request->getParam("pin", true)->value().toInt();
@@ -482,7 +485,7 @@ void setPinTimed(AsyncWebServerRequest *request){
 }
 
 void readPin(AsyncWebServerRequest *request){
-  String msg;
+  String msg = "";
   
   if(request -> hasParam("socketonly", true)){
     socket.textAll(pinState);
@@ -510,7 +513,7 @@ void setHigh(AsyncWebServerRequest *request){
 }
 
 void addSchedule(AsyncWebServerRequest *request){
-  String msg;
+  String msg = "";
 
   if(timeClient.isTimeSet()){
      if(request -> hasParam("type", true) && request -> hasParam("pin", true)){
@@ -578,7 +581,7 @@ void addSchedule(AsyncWebServerRequest *request){
 }
 
 void deleteSchedule(AsyncWebServerRequest *request){
-  String msg;
+  String msg = "";
 
   if(request -> hasParam("id", true)){
     boolean deleted = false;
@@ -615,7 +618,7 @@ void deleteSchedule(AsyncWebServerRequest *request){
 }
 
 void getSchedule(AsyncWebServerRequest *request){
-  String result;
+  String result = "";
   serializeJson(schedule, result);
   request -> send(200, "application/json", result);
 }
@@ -727,7 +730,7 @@ void setup() {
   schedule["available"] = false;
   scheduleOneTime = schedule.createNestedArray("onetime");
   scheduleRepeating = schedule.createNestedArray("repeating");
-
+ 
   timeClient.begin();
   
   if(!timeClient.update()){
@@ -736,6 +739,8 @@ void setup() {
 
   if(timeClient.isTimeSet()){
     timeSynced = true;
+    schedule["available"] = true;
+    getTimeStampString(timeClient.getEpochTime() - millis()/1000).toCharArray(lastStartup, 32);
     Serial.println("NTP synced");
   }else{
     Serial.println("NTP not synced");
@@ -747,13 +752,13 @@ void setup() {
     randomSeed(micros() + getEpochTime() + random(1, 1000*i));
   }
 
-  byte urlsCount = 13;
+  byte urlsCount = 15;
   byte urlsLength = 15;
 
   String urls[urlsCount];
 
   for(int i = 0; i < urlsCount; i++){
-    String trueRandom;
+    String trueRandom = "";
     boolean duplicate = false;
     
     do{
@@ -770,8 +775,8 @@ void setup() {
     urls[i] = "/" + trueRandom;
   }
 
-  StaticJsonDocument<512> doc;
-  
+  StaticJsonDocument<768> doc;
+
   doc["success"] = true;
   
   JsonObject urlsObject = doc.createNestedObject("urls");
@@ -788,19 +793,15 @@ void setup() {
   urlsObject["getlaststartup"]  = urls[10];
   urlsObject["startwm"]         = urls[11];
   urlsObject["wlanreset"]       = urls[12];
+  urlsObject["mainjs"]          = urls[13];
+  urlsObject["datajs"]          = urls[14];
 
   serializeJson(doc, jsonURLS);
 
-  String tempMainJS = "/" + generateRandomString(urlsLength);
-  String tempDataJS = "/" + generateRandomString(urlsLength);
-
-  tempMainJS.toCharArray(mainjs, 32);
-  tempDataJS.toCharArray(datajs, 32);
-
-  Serial.println(mainjs);
-  Serial.println(datajs);
+  urls[13].toCharArray(mainjs, 24);
+  urls[14].toCharArray(datajs, 24);
  
-  AsyncWebSocket socketTemp("/readpinsocket"); // randomize
+  AsyncWebSocket socketTemp(urls[3].c_str());
   socket = socketTemp;
 
   server.addHandler(&socket);
@@ -810,23 +811,38 @@ void setup() {
   server.on("/index.html", HTTP_GET, indexPage);
   server.on("/logout", HTTP_GET, logout);
   server.on("/logout.html", HTTP_GET, logout);
-  server.on(mainjs, HTTP_GET, mainJSHandler); //randomize
-  server.on(datajs, HTTP_GET, dataJSHandler); //randomize
+  server.on(urls[13].c_str(), HTTP_GET, mainJSHandler);
+  server.on(urls[14].c_str(), HTTP_GET, dataJSHandler);
   
-  server.on("/setpin", HTTP_POST, setPin);
-  server.on("/setpintimed", HTTP_POST, setPinTimed);
-  server.on("/readpin", HTTP_POST, readPin);
-  server.on("/setlow", HTTP_POST, setLow);
-  server.on("/sethigh", HTTP_POST, setHigh);
+  server.on(urls[0].c_str(), HTTP_POST, setPin);
+  server.on(urls[1].c_str(), HTTP_POST, setPinTimed);
+  server.on(urls[2].c_str(), HTTP_POST, readPin);
+  server.on(urls[4].c_str(), HTTP_POST, setLow);
+  server.on(urls[5].c_str(), HTTP_POST, setHigh);
   
-  server.on("/addschedule", HTTP_POST, addSchedule);
-  server.on("/deleteschedule", HTTP_POST, deleteSchedule);
-  server.on("/getschedule", HTTP_POST, getSchedule);
+  server.on(urls[6].c_str(), HTTP_POST, addSchedule);
+  server.on(urls[7].c_str(), HTTP_POST, deleteSchedule);
+  server.on(urls[8].c_str(), HTTP_POST, getSchedule);
 
-  server.on("/esprestart", HTTP_GET, espRestartWeb);
-  server.on("/getlaststartup", HTTP_GET, getLastStartup);
-  server.on("/startwm", HTTP_GET, startWM);
-  server.on("/wlanreset", HTTP_GET, wlanResetWeb);
+  server.on(urls[9].c_str(), HTTP_GET, espRestartWeb);
+  server.on(urls[10].c_str(), HTTP_GET, getLastStartup);
+  server.on(urls[11].c_str(), HTTP_GET, startWM);
+  server.on(urls[12].c_str(), HTTP_GET, wlanResetWeb);
+
+//  server.on("/setpin", HTTP_POST, setPin);
+//  server.on("/setpintimed", HTTP_POST, setPinTimed);
+//  server.on("/readpin", HTTP_POST, readPin);
+//  server.on("/setlow", HTTP_POST, setLow);
+//  server.on("/sethigh", HTTP_POST, setHigh);
+//  
+//  server.on("/addschedule", HTTP_POST, addSchedule);
+//  server.on("/deleteschedule", HTTP_POST, deleteSchedule);
+//  server.on("/getschedule", HTTP_POST, getSchedule);
+//
+//  server.on("/esprestart", HTTP_GET, espRestartWeb);
+//  server.on("/getlaststartup", HTTP_GET, getLastStartup);
+//  server.on("/startwm", HTTP_GET, startWM);
+//  server.on("/wlanreset", HTTP_GET, wlanResetWeb);
 
   server.on("/geturls", HTTP_GET, getUrls);
   
@@ -849,26 +865,6 @@ void setup() {
 
   if(jsonFile != ""){
     deserializeJson(schedule, jsonFile);
-  }
-
-  if(timeClient.isTimeSet()){
-    schedule["available"] = true;
-    boolean collect = false;
-  
-    for(JsonArray::iterator it = scheduleOneTime.begin(); it != scheduleOneTime.end(); ++it){
-      if((*it)["endTimestamp"] < getEpochTime()){
-        scheduleOneTime.remove(it);
-        collect = true;
-      }
-    }
-  
-    if(collect){
-      garbageCollector(schedule);
-    }
-  
-    getTimeStampString(timeClient.getEpochTime() - millis()/1000).toCharArray(lastStartup, 32);
-  }else{
-    schedule["available"] = false;
   }
 
   Serial.print("Free Heap : ");
