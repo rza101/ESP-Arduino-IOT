@@ -6,7 +6,7 @@ var urls            = JSON.parse(dataURLS)
 const setpinURL           = urls.urls["setpin"]
 const setpintimedURL      = urls.urls["setpintimed"]
 const readpinURL          = urls.urls["readpin"]
-const readpinsocketURL    = "ws://" + window.location.hostname + urls.urls["readpinsocket"]
+const readpineventURL     = urls.urls["readpinevent"]
 const setlowURL           = urls.urls["setlow"]
 const sethighURL          = urls.urls["sethigh"]
 const addScheduleURL      = urls.urls["addschedule"]
@@ -23,14 +23,32 @@ const global = Vue.observable({
     timeNow: Date.now()
 })
 
-var WSDisconnected = false
-var lastWSNotify = 0
-var ws
+var serverDisconnected = false
+var lastEventActive = 0
 
-function socketOnMessage(event){
-    if(event.data == "ONLINE"){
-        lastWSNotify = global.timeNow
-    }else{
+function startEventSource(){
+    const pinEvent = new EventSource(readpineventURL)
+
+    pinEvent.addEventListener('open', function(event) {
+        lastEventActive = global.timeNow
+
+        console.log("event connected")
+    })
+
+    pinEvent.addEventListener('error', function(event) {
+        if (event.target.readyState != EventSource.OPEN) {
+            serverDisconnected = true
+
+            console.log("event disconnected")
+
+            setTimeout(window.options.serverDisconnected(), 3000)
+        }
+    })
+
+    pinEvent.addEventListener('pinstate', function(event) {
+        window.pinControl.updatingState = true
+        lastEventActive = global.timeNow
+
         try{
             var data = JSON.parse(event.data)
             
@@ -40,28 +58,13 @@ function socketOnMessage(event){
                 console.log("pin update success")
             }
         }catch(error){
-            console.log("pin update error")
+            console.log("pin update error + (" + error + ")")
         }
-    }
-}
+    })
 
-function startWebsocket() {
-    ws = new WebSocket(readpinsocketURL)
-
-    ws.onclose = function(){
-        WSDisconnected = true
-
-        console.log("websocket disconnected")
-
-        window.options.WSDisconnected()
-    }
-    ws.onmessage = socketOnMessage
-    ws.onopen = function(){
-        WSDisconnected = false
-        lastWSNotify = global.timeNow
-
-        console.log("websocket connected")
-    }
+    pinEvent.addEventListener('notify', function(event) {
+        lastEventActive = global.timeNow
+    })
 }
 
 function resetDisable(){
@@ -71,17 +74,17 @@ function resetDisable(){
 function periodic(){
     global.timeNow = Date.now()
 
-    if(global.timeNow - lastWSNotify >= 10000 && !WSDisconnected){
-        WSDisconnected = true
+    if(global.timeNow - lastEventActive >= 10000 && !serverDisconnected){
+        serverDisconnected = true
 
-        console.log("websocket disconnected")
+        console.log("event disconnected")
 
-        window.options.WSDisconnected()
+        window.options.serverDisconnected()
     }
 }
 
 setInterval(periodic, 1000)
-startWebsocket()
+startEventSource()
 
 window.pinControl = new Vue({
     components: {
@@ -119,9 +122,7 @@ window.pinControl = new Vue({
                             .then(function (response) {
                                 var data = response.data
 
-                                if(data.success == true){
-                                    window.pinControl.updatingState = true
-                                }else if(data.success == false){
+                                if(data.success == false){
                                     window.options.modalOK("Set Pin Failed (" + data.message + ")", {
                                         title: "Error",
                                         centered: true,
@@ -155,9 +156,7 @@ window.pinControl = new Vue({
                             .then(function (response) {
                                 var data = response.data
 
-                                if(data.success == true){
-                                    window.pinControl.updatingState = true
-                                }else if(data.success == false){
+                                if(data.success == false){
                                     window.options.modalOK("Set Pin Failed (" + data.message + ")", {
                                         title: "Error",
                                         centered: true,
@@ -213,9 +212,7 @@ window.pinControl = new Vue({
                     .then(function (response) {
                         var data = response.data
 
-                        if(data.success == true){
-                            window.pinControl.updatingState = true
-                        }else if(data.success == false){
+                        if(data.success == false){
                             window.options.modalOK("Set Pin Failed (" + data.message + ")", {
                                 title: "Error",
                                 centered: true,
@@ -243,9 +240,7 @@ window.pinControl = new Vue({
                     .then(function (response) {
                         var data = response.data
 
-                        if(data.success == true){
-                            window.pinControl.updatingState = true
-                        }else if(data.success == false){
+                         if(data.success == false){
                             window.options.modalOK("Set Pin Failed (" + data.message + ")", {
                                 title: "Error",
                                 centered: true,
@@ -927,11 +922,12 @@ window.options = new Vue({
                 })
             })
         },
-        WSDisconnected: function(){
+        serverDisconnected: function(){
             this.$bvModal.msgBoxOk("Server not connected. Try to reload the page", {
                 title: 'Error',
                 centered: true,
-                okVariant: 'danger'
+                okVariant: 'danger',
+                noStacking: true
             })
             .then(function(value) {
                 window.location.reload()

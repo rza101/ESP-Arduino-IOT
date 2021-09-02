@@ -30,7 +30,7 @@ WiFiManager wifiManager;
 // WLAN VARIABLES
 
 const char* configAPSSID = "ESP8266";
-const char* configAPPass = "esp8266.CONFIG";
+const char* configAPPass = "esp8266";
 const char* wmMessage = "Connect to ESP8266 and open 192.168.4.1 to access WiFi Manager (150s timeout)";
 WiFiManager wifiManager;
 
@@ -43,14 +43,11 @@ char datajs[24];
 char mainjs[24];
 char jsonURLS[768];
 
-unsigned long lastCleanupClient = 0;
-unsigned long lastSocketNotify = 0;
-
-short cleanupClientInterval = 1000;
-short socketNotifyInterval = 2000;
+unsigned long lastEventSend = 0;
+unsigned long eventNotifyInterval = 2000;
 
 AsyncWebServer server(80);
-AsyncWebSocket socket("/");
+AsyncEventSource pinEvents("/readpinevent");
 
 // TIME VARIABLES
 
@@ -97,13 +94,6 @@ void sendCommand(String msg){
 
 // OTHER METHODS
 
-void cleanupClient(){
-  if(millis() - lastCleanupClient >= cleanupClientInterval){
-    socket.cleanupClients();
-    lastCleanupClient = millis();
-  }
-}
-
 void espNotify(){
   if(!sending && !updatePinState){
     if(millis() - lastActive >= 20000){
@@ -116,10 +106,18 @@ void espRestart(){
   Serial.println();
   Serial.println("Restarting in 5s...");
   delay(500);
+  pinEvents.close();
   server.end();
   sendCommand("ESPOFFLINE");
   delay(5000);
   ESP.restart();
+}
+
+void eventNotify(){
+  if(millis() - lastEventSend >= eventNotifyInterval){
+    pinEvents.send("ONLINE", "notify");
+    lastEventSend = millis();
+  }
 }
 
 void garbageCollector(JsonDocument &data){
@@ -311,13 +309,6 @@ void scheduler(){
   }
 }
 
-void socketNotify(){
-  if(millis() - lastSocketNotify >= socketNotifyInterval){
-    socket.textAll("ONLINE");
-    lastSocketNotify = millis();
-  }
-}
-
 void wlanReset(){
   wifiManager.resetSettings();
   wifiManager.resetSettings();
@@ -366,7 +357,8 @@ void updatePin(){
     serializeJson(doc, result);
 
     result.toCharArray(pinState, 128);
-    socket.textAll(result);
+    pinEvents.send(result.c_str(), "pinstate");
+    lastEventSend = millis();
     
     updatePinState = false;
   }
@@ -487,13 +479,15 @@ void setPinTimed(AsyncWebServerRequest *request){
 void readPin(AsyncWebServerRequest *request){
   String msg = "";
   
-  if(request -> hasParam("socketonly", true)){
-    socket.textAll(pinState);
+  if(request -> hasParam("sseonly", true)){
+    pinEvents.send(pinState, "pinstate");
+    lastEventSend = millis();
     msg = generateJSON(true, "message", "OK");
   }else if(request -> hasParam("jsononly", true)){
     msg = pinState;
   }else{
-    socket.textAll(pinState);
+    pinEvents.send(pinState, "pinstate");
+    lastEventSend = millis();
     msg = pinState;
   }
  
@@ -783,7 +777,7 @@ void setup() {
   urlsObject["setpin"]          = urls[0];
   urlsObject["setpintimed"]     = urls[1];
   urlsObject["readpin"]         = urls[2];
-  urlsObject["readpinsocket"]   = urls[3];              
+  urlsObject["readpinevent"]    = urls[3];              
   urlsObject["setlow"]          = urls[4];
   urlsObject["sethigh"]         = urls[5];
   urlsObject["addschedule"]     = urls[6];
@@ -800,20 +794,21 @@ void setup() {
 
   urls[13].toCharArray(mainjs, 24);
   urls[14].toCharArray(datajs, 24);
- 
-  AsyncWebSocket socketTemp(urls[3].c_str());
-  socket = socketTemp;
 
-  server.addHandler(&socket);
+  AsyncEventSource pinEventsTemp(urls[3].c_str());
+  pinEvents = pinEventsTemp;
+
+  server.addHandler(&pinEvents);
 
   server.on("/", HTTP_GET, indexPage);
   server.on("/index", HTTP_GET, indexPage);
   server.on("/index.html", HTTP_GET, indexPage);
   server.on("/logout", HTTP_GET, logout);
   server.on("/logout.html", HTTP_GET, logout);
+  
   server.on(urls[13].c_str(), HTTP_GET, mainJSHandler);
   server.on(urls[14].c_str(), HTTP_GET, dataJSHandler);
-  
+ 
   server.on(urls[0].c_str(), HTTP_POST, setPin);
   server.on(urls[1].c_str(), HTTP_POST, setPinTimed);
   server.on(urls[2].c_str(), HTTP_POST, readPin);
@@ -886,8 +881,7 @@ void setup() {
 }
 
 void loop() {
-  cleanupClient();
-  socketNotify();
+  eventNotify();
   timeClient.update();
 
   if(!timeSynced && timeClient.isTimeSet()){
@@ -910,6 +904,7 @@ void loop() {
   }else if(param == "UPDATEPIN"){
     updatePinState = true;
   }else if(param == "STARTWM" || startWifiMananger){
+    pinEvents.close();
     server.reset();
     server.end();
     
