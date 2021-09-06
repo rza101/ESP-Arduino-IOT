@@ -30,7 +30,7 @@ WiFiManager wifiManager;
 // WLAN VARIABLES
 
 const char* configAPSSID = "ESP8266";
-const char* configAPPass = "esp8266";
+const char* configAPPass = "esp8266.CONFIG";
 const char* wmMessage = "Connect to ESP8266 and open 192.168.4.1 to access WiFi Manager (150s timeout)";
 WiFiManager wifiManager;
 
@@ -39,7 +39,6 @@ WiFiManager wifiManager;
 const char* indexUser = "admin";
 const char* indexPass = "admin";
 
-char datajs[24];
 char mainjs[24];
 char jsonURLS[768];
 
@@ -67,7 +66,7 @@ JsonArray scheduleRepeating;
 // PIN STATE VARIABLES
 
 byte pinCount = 10;
-byte pinList[10] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+byte pinList[] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
 boolean updatePinState = true;
 char pinState[128];
 
@@ -79,14 +78,14 @@ unsigned long lastActive = 0;
 // TRIGGER VARIABLES
 
 boolean espRestartTrigger = false;
-boolean startWifiMananger = false;
+boolean startWifiManagerTrigger = false;
 boolean wlanResetTrigger = false;
 
 // SERIAL METHODS
 
 void sendCommand(String msg){
   sending = true;
-  Serial.print(msg + " ");
+  Serial.println(msg);
   sending = false;
   
   lastActive = millis();
@@ -103,7 +102,8 @@ void espNotify(){
 }
 
 void espRestart(){
-  Serial.println();
+  espRestartTrigger = false;
+
   Serial.println("Restarting in 5s...");
   delay(500);
   pinEvents.close();
@@ -257,13 +257,13 @@ void saveSchedule(){
   serializeJson(schedule, temp);
   
   if(writeFile(LittleFS, "/schedule.txt", temp.c_str())){
-    Serial.print("SAVED ");
+    Serial.println("SAVED");
   }
 }
 
 void scheduler(){
   if(!sending && !updatePinState && timeClient.isTimeSet()){
-    if(millis() - lastSchedule >= 500){
+    if(millis() - lastSchedule >= 250){
       boolean deleted = false;
       lastSchedule = millis();
 
@@ -271,14 +271,13 @@ void scheduler(){
         unsigned int pin = (*it)["pin"];
         unsigned long startTimestamp = (*it)["startTimestamp"];
         unsigned long endTimestamp = (*it)["endTimestamp"];
+        boolean started = (*it)["started"];
 
-        if(startTimestamp <= getEpochTime() && endTimestamp > getEpochTime()){
+        if(startTimestamp <= getEpochTime() && endTimestamp > getEpochTime() && !started){
           unsigned long duration = (endTimestamp - startTimestamp)*1000;
           sendCommand("SETTIMED " + String(pin) + " " + String(duration));
           updatePinState = true;
-
-          scheduleOneTime.remove(it);
-          deleted = true;
+          (*it)["started"] = true;
         }
 
         if(endTimestamp < getEpochTime()){
@@ -309,12 +308,41 @@ void scheduler(){
   }
 }
 
+void startWifiManager(){
+  startWifiManagerTrigger = false;
+  pinEvents.close();
+  server.end();
+
+  Serial.println("Stopping server and starting WiFi Manager");
+  Serial.println(wmMessage);
+  Serial.println("Device will restart after config success");
+
+  WiFi.disconnect(true);
+
+  while(WiFi.status() != WL_CONNECTED){
+    wifiManager.startConfigPortal(configAPSSID, configAPPass);
+    
+    if(WiFi.status() != WL_CONNECTED){
+      Serial.println("Failed Connecting");
+      Serial.println("Restarting WiFi Manager");
+    }
+  }
+
+  Serial.print("Connected to ");
+  Serial.println(WiFi.SSID());
+  Serial.print("IP Address ");
+  Serial.println(WiFi.localIP());
+  
+  espRestart();
+}
+
 void wlanReset(){
+  wlanResetTrigger = false;
+
   wifiManager.resetSettings();
   wifiManager.resetSettings();
   wifiManager.resetSettings();
-  Serial.println();
-  Serial.print("Resetting WLAN Config");
+  Serial.println("Resetting WLAN Config");
   espRestart();
 }
 
@@ -339,7 +367,7 @@ void updatePin(){
     
     sendCommand("READ");
     
-    Serial.readString().toCharArray(tempState, 128);
+    Serial.readStringUntil('\n').toCharArray(tempState, 128);
 
     StaticJsonDocument<256> doc;
     StaticJsonDocument<192> states;
@@ -405,8 +433,6 @@ String templateProcessor(const String& var){
     return generateJSON(status, "message", lastStartup);
   }else if(var == "MAIN_JS"){
     return String(mainjs);
-  }else if(var == "DATA_JS"){
-    return String(datajs);
   }
     
   return String();
@@ -427,11 +453,11 @@ void logout(AsyncWebServerRequest *request){
 }
 
 void mainJSHandler(AsyncWebServerRequest *request){
-  request->send(LittleFS, "/main.js", "application/javascript");
-}
-
-void dataJSHandler(AsyncWebServerRequest *request){
-  request->send(LittleFS, "/data.js", "application/javascript", false, templateProcessor);
+  AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/main.js.gzp", "application/javascript");
+  response->addHeader("Cache-Control", "max-age=86400");
+  response->addHeader("Content-Encoding", "gzip");
+  
+  request->send(response);
 }
 
 void setPin(AsyncWebServerRequest *request){
@@ -526,6 +552,7 @@ void addSchedule(AsyncWebServerRequest *request){
               schedObj["startTimestamp"] = startTimestamp;
               schedObj["endTimestamp"] = endTimestamp;
               schedObj["pin"] = pin;
+              schedObj["started"] = false;
       
               msg = generateJSON(true, "message", "OK");
               saveSchedule();
@@ -642,7 +669,7 @@ void getUrls(AsyncWebServerRequest *request){
 
 void startWM(AsyncWebServerRequest *request){
   request -> send(200, "application/json", generateJSON(true, "message", String(wmMessage) + ". Device will restart after config success"));
-  startWifiMananger = true;
+  startWifiManagerTrigger = true;
 }
 
 void wlanResetWeb(AsyncWebServerRequest *request){
@@ -651,7 +678,7 @@ void wlanResetWeb(AsyncWebServerRequest *request){
 }
 
 void notFound(AsyncWebServerRequest *request){
-  if(request->url() == "/main.js" || request->url() == "/data.js"){
+  if(request->url() == "/main.js"){
      request->send(404);
   }else{
     AsyncWebServerResponse* response = request->beginResponse(LittleFS, request->url(), getContentType(request->url()), false);
@@ -746,7 +773,7 @@ void setup() {
     randomSeed(micros() + getEpochTime() + random(1, 1000*i));
   }
 
-  byte urlsCount = 15;
+  byte urlsCount = 14;
   byte urlsLength = 15;
 
   String urls[urlsCount];
@@ -788,12 +815,10 @@ void setup() {
   urlsObject["startwm"]         = urls[11];
   urlsObject["wlanreset"]       = urls[12];
   urlsObject["mainjs"]          = urls[13];
-  urlsObject["datajs"]          = urls[14];
 
   serializeJson(doc, jsonURLS);
 
   urls[13].toCharArray(mainjs, 24);
-  urls[14].toCharArray(datajs, 24);
 
   AsyncEventSource pinEventsTemp(urls[3].c_str());
   pinEvents = pinEventsTemp;
@@ -805,9 +830,7 @@ void setup() {
   server.on("/index.html", HTTP_GET, indexPage);
   server.on("/logout", HTTP_GET, logout);
   server.on("/logout.html", HTTP_GET, logout);
-  
   server.on(urls[13].c_str(), HTTP_GET, mainJSHandler);
-  server.on(urls[14].c_str(), HTTP_GET, dataJSHandler);
  
   server.on(urls[0].c_str(), HTTP_POST, setPin);
   server.on(urls[1].c_str(), HTTP_POST, setPinTimed);
@@ -866,7 +889,15 @@ void setup() {
   Serial.println(ESP.getFreeHeap(), DEC);
 
   Serial.println("ESP READY");
-  delay(500);
+
+  sendCommand("ESP");
+  delay(250);
+  
+  sendCommand("ESP");
+  delay(250);
+  
+  sendCommand("ESP");
+  delay(250);
 
   updatePin();
   updatePinState = true;
@@ -881,7 +912,10 @@ void setup() {
 }
 
 void loop() {
+  espNotify();
   eventNotify();
+  scheduler();
+  updatePin();
   timeClient.update();
 
   if(!timeSynced && timeClient.isTimeSet()){
@@ -890,54 +924,49 @@ void loop() {
     getTimeStampString(timeClient.getEpochTime() - millis()/1000).toCharArray(lastStartup, 32);
     Serial.print("NTP synced ");
   }
-  
-  espNotify();
-  scheduler();
-  updatePin();
 
-  String param = Serial.readString();
-
-  if(param == "ESPRESTART" || espRestartTrigger){
-    espRestart();
-  }else if(param == "WLANRESET" || wlanResetTrigger){
-    wlanReset();
-  }else if(param == "UPDATEPIN"){
-    updatePinState = true;
-  }else if(param == "STARTWM" || startWifiMananger){
-    pinEvents.close();
-    server.reset();
-    server.end();
+  if(Serial.available() > 0 && !updatePinState){
+    String input = Serial.readStringUntil('\n');
     
-    sendCommand("ESPOFFLINE");
-    
-    Serial.println("");
-    Serial.println("Stopping server and starting WiFi Manager");
-    Serial.println(wmMessage);
-    Serial.println("Device will restart after config success");
+    input.trim();
+    input.toLowerCase();
 
-    WiFi.disconnect(true);
+    String tokens[8];
 
-    while(WiFi.status() != WL_CONNECTED){
-      wifiManager.startConfigPortal(configAPSSID, configAPPass);
-      
-      if(WiFi.status() != WL_CONNECTED){
-        Serial.println("Failed Connecting");
-        Serial.println("Restarting WiFi Manager");
-      }
+    char* token = strtok((char*) input.c_str(), " ");
+    byte tokenCount = 0;
+
+    while(token != NULL && tokenCount < 8){
+      tokens[tokenCount++] = token;
+      token = strtok(NULL, " ");
     }
 
-    Serial.print("Connected to ");
-    Serial.println(WiFi.SSID());
-    Serial.print("IP Address ");
-    Serial.println(WiFi.localIP());
-    
+    if(tokens[0].equals("esprestart") && tokenCount == 1){
+      espRestartTrigger = true;
+    }else if(tokens[0].equals("wlanreset") && tokenCount == 1){
+      wlanResetTrigger = true;
+    }else if(tokens[0].equals("startwm") && tokenCount == 1){
+      startWifiManagerTrigger = true;
+    }else if(tokens[0].equals("updatepin") && tokenCount == 1){
+      updatePinState = true;
+    }else{
+      Serial.println("INVALID_COMMAND");
+    }
+  }
+
+  if(espRestartTrigger){
     espRestart();
-  }else if(WiFi.status() != WL_CONNECTED){
+  }else if(wlanResetTrigger){
+    wlanReset();
+  }else if(startWifiManagerTrigger){
+    startWifiManager();
+  }
+
+  if(WiFi.status() != WL_CONNECTED){
     WiFi.reconnect();
     
     sendCommand("ESPOFFLINE");
     
-    Serial.println("");
     Serial.println("WiFi Disconnected");
     Serial.print("Reconnecting");
 

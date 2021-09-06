@@ -2,6 +2,10 @@
 
 Using serial communication between Arduino and ESP8266 (because i use  ESP-01 and the GPIOs are limited and not practical to use)
 
+**UPDATE**
+
+Now can be used without arduino (esp8266 only)
+
 **Features** 
 * Supports control to all pins that specified in code (includes timing)
 * Responsive web interface using [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) (API is available for other platform)

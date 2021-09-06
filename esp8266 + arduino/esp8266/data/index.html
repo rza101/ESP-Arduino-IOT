@@ -8,9 +8,8 @@
     <link href="bootstrap.min.css.gzp" rel="stylesheet" type="text/css">
     <link href="bootstrap-vue.min.css.gzp" rel="stylesheet" type="text/css">
     <script src="axios.min.js.gzp" type="application/javascript"></script>
-    <script src="vue.js.gzp" type="application/javascript"></script>
+    <script src="vue.min.js.gzp" type="application/javascript"></script>
     <script src="bootstrap-vue.min.js.gzp" type="application/javascript"></script>
-    <script src="%DATA_JS%" type="application/javascript"></script>
   </head>
   <body>
     <div class="container-md">
@@ -67,6 +66,12 @@
 
     </div>
     
+    <script>
+      var dataLastStartup = '%LAST_STARTUP%'
+      var dataPinState = '%PINSTATE%'
+      var dataSchedule = '%SCHEDULE%'
+      var dataURLS = '%URLS%'
+    </script>
     <script src="%MAIN_JS%" type="application/javascript"></script>
   </body>
 </html>
