@@ -1,10 +1,6 @@
 # ESP-Arduino-IOT
 
-Using serial communication between Arduino and ESP8266 (because i use  ESP-01 and the GPIOs are limited and not practical to use)
-
-**UPDATE**
-
-Now can be used without arduino (esp8266 only)
+Using serial communication between Arduino and ESP8266 (because i use  ESP-01 and the GPIOs are limited and not practical to use). Now can be used without Arduino (esp8266 only)
 
 **Features** 
 
