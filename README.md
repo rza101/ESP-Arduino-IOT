@@ -16,3 +16,11 @@ Now can be used without arduino (esp8266 only)
 * When compiling, use at least 512kB FS data  and use only lwIP v2 Lower Memory (Higher bandwidth version seems to be unstable, and lower memory version is fast enough)
 * Don't be confused with .gzp extension. It is actually .gz file. This avoids auto downloading by external downloader, ex: IDM
 * WiFi Manager and web interface credentials can be modified in code
+
+**Screenshots**
+
+![Preview](img/1.png)
+
+![Preview](img/2.png)
+
+![Preview](img/3.png)
