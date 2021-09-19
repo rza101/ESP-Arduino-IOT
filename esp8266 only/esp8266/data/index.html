@@ -56,7 +56,7 @@
           <b-card-header class="text-center" header-bg-variant="primary" header-text-variant="white" v-b-toggle="'options_collapse'">Options</b-card-header>
 
           <b-collapse id="options_collapse" class="text-center">
-            <last-startup></last-startup>
+            <uptime></uptime>
             <restart-esp></restart-esp>
             <reset-wlan></reset-wlan>
             <logout></logout>
@@ -67,7 +67,7 @@
     </div>
     
     <script>
-      var dataLastStartup = '%LAST_STARTUP%'
+      var dataUptime = '%UPTIME%'
       var dataPinState = '%PINSTATE%'
       var dataSchedule = '%SCHEDULE%'
       var dataURLS = '%URLS%'

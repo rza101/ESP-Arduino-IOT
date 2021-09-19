@@ -30,7 +30,7 @@ WiFiManager wifiManager;
 // WLAN VARIABLES
 
 const char* configAPSSID = "ESP8266";
-const char* configAPPass = "esp8266";
+const char* configAPPass = "wificonfig"; // LENGTH MUST BE >= 8 CHARACTERS
 const char* wmMessage = "Connect to ESP8266 and open 192.168.4.1 to access WiFi Manager (150s timeout)";
 WiFiManager wifiManager;
 
@@ -51,10 +51,11 @@ AsyncEventSource pinEvents("/readpinevent");
 // TIME VARIABLES
 
 boolean timeSynced = false;
-char lastStartup[32];
 unsigned int offset = 25200;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "0.id.pool.ntp.org", offset, 60000); // udp, ntp pool, offset, update interval (ms)
+unsigned long lastUptimeUpdate = 0;
+unsigned long uptime = 0;
 
 // SCHEDULER VARIABLES
 
@@ -286,31 +287,6 @@ unsigned long getEpochTime(){
   return timeClient.getEpochTime() - offset;
 }
 
-String getTimeStampString(time_t rawtime){
-   struct tm* ti;
-   ti = localtime (&rawtime);
-
-   uint16_t year = ti->tm_year + 1900;
-   String yearStr = String(year);
-
-   uint8_t month = ti->tm_mon + 1;
-   String monthStr = month < 10 ? "0" + String(month) : String(month);
-
-   uint8_t day = ti->tm_mday;
-   String dayStr = day < 10 ? "0" + String(day) : String(day);
-
-   uint8_t hours = ti->tm_hour;
-   String hoursStr = hours < 10 ? "0" + String(hours) : String(hours);
-
-   uint8_t minutes = ti->tm_min;
-   String minuteStr = minutes < 10 ? "0" + String(minutes) : String(minutes);
-
-   uint8_t seconds = ti->tm_sec;
-   String secondStr = seconds < 10 ? "0" + String(seconds) : String(seconds);
-
-   return yearStr + "-" + monthStr + "-" + dayStr + " " + hoursStr + ":" + minuteStr + ":" + secondStr;
-}
-
 String readFile(fs::FS &fs, const char* path){
   File file = fs.open(path, "r");
   
@@ -409,6 +385,13 @@ void startWifiManager(){
   espRestart();
 }
 
+void uptimeLoop(){
+  if(millis() - lastUptimeUpdate >= 1000){
+    uptime++;
+    lastUptimeUpdate = millis();
+  }
+}
+
 void wlanReset(){
   wlanResetTrigger = false;
   
@@ -464,14 +447,8 @@ String templateProcessor(const String& var){
     String temp = "";
     serializeJson(schedule, temp);
     return temp;
-  }else if(var == "LAST_STARTUP"){
-    boolean status = true;
-
-    if(String(lastStartup) == ""){
-      status = false;
-    }
-    
-    return generateJSON(status, "message", lastStartup);
+  }else if(var == "UPTIME"){
+    return generateJSON(true, "message", String(uptime));
   }else if(var == "MAIN_JS"){
     return String(mainjs);
   }
@@ -686,14 +663,8 @@ void espRestartWeb(AsyncWebServerRequest *request){
   espRestartTrigger = true;
 }
 
-void getLastStartup(AsyncWebServerRequest *request){
-  boolean status = true;
-
-  if(String(lastStartup) == ""){
-    status = false;
-  }
-  
-  request -> send(200, "application/json", generateJSON(status, "message", lastStartup));
+void getUptime(AsyncWebServerRequest *request){
+  request -> send(200, "application/json", generateJSON(true, "message", String(uptime)));
 }
 
 void getUrls(AsyncWebServerRequest *request){
@@ -746,7 +717,7 @@ void setup() {
   wifiManager.setAPClientCheck(true);         //  WM timeout stop when client connected
   wifiManager.setBreakAfterConfig(true);      //  break after saving, otherwise WM keep running if failed connecting
   wifiManager.setCaptivePortalEnable(false);  
-  wifiManager.setClass("invert");             
+  wifiManager.setClass("invert");           
   wifiManager.setConfigPortalTimeout(150);    
   wifiManager.setConnectTimeout(15);          
   wifiManager.setDebugOutput(false);           
@@ -800,7 +771,6 @@ void setup() {
   if(timeClient.isTimeSet()){
     timeSynced = true;
     schedule["available"] = true;
-    getTimeStampString(timeClient.getEpochTime() - millis()/1000).toCharArray(lastStartup, 32);
     Serial.println("NTP synced");
   }else{
     Serial.println("NTP not synced");
@@ -850,7 +820,7 @@ void setup() {
   urlsObject["deleteschedule"]  = urls[7];
   urlsObject["getschedule"]     = urls[8];
   urlsObject["esprestart"]      = urls[9];
-  urlsObject["getlaststartup"]  = urls[10];
+  urlsObject["getuptime"]       = urls[10];
   urlsObject["startwm"]         = urls[11];
   urlsObject["wlanreset"]       = urls[12];
   urlsObject["mainjs"]          = urls[13];
@@ -882,7 +852,7 @@ void setup() {
   server.on(urls[8].c_str(), HTTP_POST, getSchedule);
 
   server.on(urls[9].c_str(), HTTP_GET, espRestartWeb);
-  server.on(urls[10].c_str(), HTTP_GET, getLastStartup);
+  server.on(urls[10].c_str(), HTTP_GET, getUptime);
   server.on(urls[11].c_str(), HTTP_GET, startWM);
   server.on(urls[12].c_str(), HTTP_GET, wlanResetWeb);
 
@@ -897,7 +867,7 @@ void setup() {
 //  server.on("/getschedule", HTTP_POST, getSchedule);
 //
 //  server.on("/esprestart", HTTP_GET, espRestartWeb);
-//  server.on("/getlaststartup", HTTP_GET, getLastStartup);
+//  server.on("/getuptime", HTTP_GET, getUptime);
 //  server.on("/startwm", HTTP_GET, startWM);
 //  server.on("/wlanreset", HTTP_GET, wlanResetWeb);
 
@@ -928,19 +898,22 @@ void setup() {
   Serial.println(ESP.getFreeHeap(), DEC);
 
   Serial.println("ESP READY");
+
+  uptime = millis()/1000 + 1;
+  lastUptimeUpdate = millis();
 }
 
 void loop() {
   eventNotify();
   scheduler();
   timedPin();
+  uptimeLoop();
   
   timeClient.update();
 
   if(!timeSynced && timeClient.isTimeSet()){
     timeSynced = true;
     schedule["available"] = true;
-    getTimeStampString(timeClient.getEpochTime() - millis()/1000).toCharArray(lastStartup, 32);
     Serial.println("NTP synced");
   }
 
@@ -996,7 +969,7 @@ void loop() {
     }else if(tokens[0].equals("low") && tokenCount == 1){
       setLow();
     }else{
-      Serial.println("INVALID COMMAND");
+      Serial.println("INVALID_COMMAND");
     }
   }
   
@@ -1036,5 +1009,8 @@ void loop() {
       Serial.println("Schedule not available until NTP synced");
       Serial.println("Check for internet connection");
     }
+
+    uptime = millis()/1000 + 1;
+    lastUptimeUpdate = millis();
   }
 }
